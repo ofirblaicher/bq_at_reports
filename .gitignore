@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+
+# Local secrets
+.env
+
+# Generated triage outputs
+langfuse_traces_*.json
+query_results_*.json
+report_metrics_*.json
+triage_report_*.html
+*_report_*.js
+*_report_*.docx

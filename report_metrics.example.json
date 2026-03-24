@@ -1,0 +1,69 @@
+{
+  "env_name": "Rocket Companies",
+  "date": "2026-03-22",
+  "date_range": "Mar 22, 2026",
+  "source": "CrowdStrike",
+  "executive_summary": "On March 16, 2026, the automated triage system processed 58 CrowdStrike alerts for Rocket Companies. 11 alerts were escalated immediately — primarily confirmed malicious AI-powered IOA and Machine Learning detections, concentrated on WIN11B-7KO935PI. 9 borderline cases were escalated for review, and 23 benign alerts were auto-closed. No analyst verdict overrides were recorded for this period.",
+  "totals": {
+    "alerts_triaged": 52,
+    "feedback_loop": 0
+  },
+  "final_decisions": {
+    "escalate_immediately": 17,
+    "escalate_for_review": 2,
+    "close": 30
+  },
+  "primary_assessment": {
+    "Confirmed Malicious": 17,
+    "High-Conf. Suspicious": 0,
+    "Anomalous but Benign": 30
+  },
+  "alerts_by_verdict": {
+    "True Positive — Benign": 44,
+    "True Positive — Malicious": 14
+  },
+  "feedback": {
+    "human_verified": 0,
+    "verdict_modified": 0,
+    "top_host": "CRBASWINPRD01",
+    "analyst_email": "",
+    "no_overrides_text": "No analyst overrides recorded for this period."
+  },
+  "trends": [
+    {
+      "host": "CRBASWINPRD01",
+      "alerts": 16,
+      "alert_type": "CrowdStrike LDT — 16 Anomalous but Benign, all auto-closed",
+      "count": 16,
+      "level": "critical"
+    },
+    {
+      "host": "azbaswinprd01",
+      "alerts": 10,
+      "alert_type": "CrowdStrike LDT — mixed: 9 Benign/BAS, 1 Confirmed Malicious",
+      "count": 10,
+      "level": "high"
+    },
+    {
+      "host": "AZRSAAPPPRD01",
+      "alerts": 6,
+      "alert_type": "CrowdStrike LDT — 6 Confirmed Malicious, all Escalate Immediately",
+      "count": 6,
+      "level": "critical"
+    },
+    {
+      "host": "VDICUSSPRD-a384",
+      "alerts": 1,
+      "alert_type": "CrowdStrike LDT — Openclaw rule triggered, Escalate Immediately",
+      "count": 1,
+      "level": "critical"
+    },
+    {
+      "host": "CRPBISQLPRD01",
+      "alerts": 1,
+      "alert_type": "CrowdStrike LDT — 1 Anomalous but Benign, Escalate for Review",
+      "count": 1,
+      "level": "high"
+    }
+  ]
+}
