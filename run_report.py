@@ -1750,6 +1750,62 @@ def main():
     output_path = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids)
 
     print(f"\n✅ Done!  Report saved →  {output_path}\n")
+    _send_to_slack(output_path)
+
+
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL   = os.environ.get("SLACK_CHANNEL", "C0AN7770N2H")
+
+
+def _send_to_slack(file_path: str) -> None:
+    import urllib.request
+    if not os.path.exists(file_path):
+        print(f"[slack] File not found, skipping: {file_path}")
+        return
+    filename = os.path.basename(file_path)
+    # Step 1: get upload URL
+    params = urllib.parse.urlencode({
+        "filename": filename,
+        "length": os.path.getsize(file_path),
+    }).encode()
+    req = urllib.request.Request(
+        "https://slack.com/api/files.getUploadURLExternal",
+        data=params,
+        headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+    )
+    with urllib.request.urlopen(req) as r:
+        meta = json.loads(r.read())
+    if not meta.get("ok"):
+        print(f"[slack] getUploadURLExternal failed: {meta.get('error')}")
+        return
+    upload_url = meta["upload_url"]
+    file_id    = meta["file_id"]
+    # Step 2: upload file
+    with open(file_path, "rb") as f:
+        data = f.read()
+    upload_req = urllib.request.Request(upload_url, data=data, method="POST")
+    upload_req.add_header("Content-Type", "application/octet-stream")
+    with urllib.request.urlopen(upload_req) as r:
+        pass
+    # Step 3: complete upload and share to channel
+    complete_body = json.dumps({
+        "files": [{"id": file_id}],
+        "channel_id": SLACK_CHANNEL,
+    }).encode()
+    complete_req = urllib.request.Request(
+        "https://slack.com/api/files.completeUploadExternal",
+        data=complete_body,
+        headers={
+            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(complete_req) as r:
+        result = json.loads(r.read())
+    if result.get("ok"):
+        print(f"[slack] ✅ Report posted to {SLACK_CHANNEL}")
+    else:
+        print(f"[slack] ❌ completeUpload failed: {result.get('error')}")
 
 
 if __name__ == "__main__":
