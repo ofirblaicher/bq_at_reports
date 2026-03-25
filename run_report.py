@@ -24,6 +24,16 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone, time
 from typing import Optional, Any
 
+# Load .env file if present (no external dependencies needed)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 try:
     from google.cloud import bigquery
     import pandas as pd

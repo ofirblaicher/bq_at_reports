@@ -38,20 +38,22 @@ Follow the browser prompt and log in with your Torq Google account.
 ```bash
 cloudflared access login https://langfuse.us.torqio.dev
 ```
-A browser window will open — log in with your Torq account. This token is cached and refreshed automatically.
+A browser window will open — log in with your Torq account. The token is cached locally.
 
-### 5. Set environment variables
+> **Note:** This token expires periodically. If Langfuse data is missing from the report, refresh it by running the command above again.
 
-Add these to your shell profile (`~/.zshrc` or `~/.bashrc`):
+### 5. Create a `.env` file
+
+Create a `.env` file in the project root (it is gitignored and never committed):
 ```bash
-export LANGFUSE_PUBLIC_KEY="your_public_key"
-export LANGFUSE_SECRET_KEY="your_secret_key"
-export SLACK_BOT_TOKEN="xoxb-..."   # ask the team for this
-export SLACK_CHANNEL="C0AN7770N2H"  # #reports channel ID
+LANGFUSE_BASE_URL=https://langfuse.us.torqio.dev
+LANGFUSE_PUBLIC_KEY=pk-lf-...       # Langfuse dashboard → Settings → API Keys
+LANGFUSE_SECRET_KEY=sk-lf-...       # Langfuse dashboard → Settings → API Keys
+SLACK_BOT_TOKEN=xoxb-...            # ask the team for this
+SLACK_CHANNEL=C0AN7770N2H           # #reports channel ID
 ```
-Then reload: `source ~/.zshrc`
 
-> You can find the Langfuse keys in the Langfuse dashboard under **Settings → API Keys**.
+The script loads this file automatically on every run.
 
 ---
 
