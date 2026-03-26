@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/ofirblaicher/Documents/GitHub/triage_alerts_bq/run_report_auto.sh</string>
+        <string>/Users/ofirblaicher/Documents/GitHub/bq_at_reports/run_report_auto.sh</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -20,11 +20,11 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/ofirblaicher/Documents/GitHub/triage_alerts_bq/triage_report.log</string>
+    <string>/Users/ofirblaicher/Documents/GitHub/bq_at_reports/triage_report.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/ofirblaicher/Documents/GitHub/triage_alerts_bq/triage_report.log</string>
+    <string>/Users/ofirblaicher/Documents/GitHub/bq_at_reports/triage_report.log</string>
 
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 </dict>
 </plist>

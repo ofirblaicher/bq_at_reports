@@ -32,7 +32,7 @@ if os.path.exists(_env_path):
             _line = _line.strip()
             if _line and not _line.startswith("#") and "=" in _line:
                 _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
+                os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 try:
     from google.cloud import bigquery
@@ -610,20 +610,20 @@ def _normalize_trace_severity(value: str) -> str:
 
 def _trace_matches_account(trace: dict, account_id: str) -> bool:
     checks = [
-        trace.get("metadata", {}).get("account_id"),
-        trace.get("output", {}).get("accountId"),
-        trace.get("input", {}).get("Workspace", {}).get("ID"),
-        trace.get("input", {}).get("workspace", {}).get("ID"),
+        (trace.get("metadata") or {}).get("account_id"),
+        (trace.get("output") or {}).get("accountId"),
+        (trace.get("input") or {}).get("Workspace", {}).get("ID"),
+        (trace.get("input") or {}).get("workspace", {}).get("ID"),
     ]
     if any(str(v) == account_id for v in checks if v is not None):
         return True
 
     haystack = json.dumps(
         {
-            "metadata": trace.get("metadata", {}),
-            "input_workspace": trace.get("input", {}).get("Workspace", {}),
-            "input_workspace_lower": trace.get("input", {}).get("workspace", {}),
-            "output": trace.get("output", {}),
+            "metadata": trace.get("metadata") or {},
+            "input_workspace": (trace.get("input") or {}).get("Workspace", {}),
+            "input_workspace_lower": (trace.get("input") or {}).get("workspace", {}),
+            "output": trace.get("output") or {},
         },
         ensure_ascii=True,
         default=str,
