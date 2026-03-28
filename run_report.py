@@ -1629,6 +1629,7 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
         trace_period_end,
         user_ids=selected_user_ids if selected_user_ids else None,
     )
+    langfuse_ok = not trace_error
     if trace_error:
         print(f"[warn] Langfuse export skipped: {trace_error}")
     else:
@@ -1698,7 +1699,7 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
     env_name = str(metrics.get("env_name", "environment")).strip().lower()
     env_slug = re.sub(r"[^a-z0-9]+", "_", env_name).strip("_") or "environment"
     filename = f"{env_slug}_report_{report_date}.docx"
-    return os.path.join(OUTPUT_DIR, filename)
+    return os.path.join(OUTPUT_DIR, filename), langfuse_ok
 
 
 # ───────────────────────────── Entry point ───────────────────────────────────
@@ -1746,21 +1747,30 @@ def main():
     print(f"  ✓ Date range   : {YESTERDAY} → {TODAY}\n")
     print("Running queries...")
 
-    if sql_file:
-        if not os.path.exists(sql_file):
-            print(f"  ! SQL file not found: {sql_file}")
-            print("  ! Falling back to built-in query templates.\n")
-            results = run_all_queries(account_id)
+    bq_ok = False
+    try:
+        if sql_file:
+            if not os.path.exists(sql_file):
+                print(f"  ! SQL file not found: {sql_file}")
+                print("  ! Falling back to built-in query templates.\n")
+                results = run_all_queries(account_id)
+            else:
+                results = run_external_sql_file(account_id, sql_file)
         else:
-            results = run_external_sql_file(account_id, sql_file)
-    else:
-        results = run_all_queries(account_id)
+            results = run_all_queries(account_id)
+        bq_ok = True
+    except Exception as e:
+        print(f"  ✗ BigQuery error: {e}")
+        results = {}
 
     print("\nBuilding DOCX report...")
-    output_path = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids)
+    output_path, langfuse_ok = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids)
 
     print(f"\n✅ Done!  Report saved →  {output_path}\n")
-    _send_to_slack(output_path)
+    if bq_ok and langfuse_ok:
+        _send_to_slack(output_path)
+    else:
+        print(f"[slack] Skipped — BigQuery OK: {bq_ok}, Langfuse OK: {langfuse_ok}")
 
 
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
