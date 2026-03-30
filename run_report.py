@@ -1770,7 +1770,13 @@ def main():
     if bq_ok and langfuse_ok:
         _send_to_slack(output_path)
     else:
-        print(f"[slack] Skipped — BigQuery OK: {bq_ok}, Langfuse OK: {langfuse_ok}")
+        failures = []
+        if not bq_ok:
+            failures.append("BigQuery")
+        if not langfuse_ok:
+            failures.append("Langfuse")
+        print(f"[slack] Skipped — failed: {', '.join(failures)}")
+        _send_error_dm(failures)
 
 
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -1826,6 +1832,28 @@ def _send_to_slack(file_path: str) -> None:
         print(f"[slack] ✅ Report posted to {SLACK_CHANNEL}")
     else:
         print(f"[slack] ❌ completeUpload failed: {result.get('error')}")
+
+
+def _send_error_dm(failures: list) -> None:
+    import urllib.request
+    if not SLACK_BOT_TOKEN:
+        return
+    msg = f":warning: *Alert Triage Report failed for {YESTERDAY}*\nThe following sources failed: *{', '.join(failures)}*\nReport was NOT sent to #reports."
+    body = json.dumps({"channel": "U09N5L9PHHN", "text": msg}).encode()
+    req = urllib.request.Request(
+        "https://slack.com/api/chat.postMessage",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req) as r:
+        result = json.loads(r.read())
+    if result.get("ok"):
+        print("[slack] ✅ Error DM sent to Ofir")
+    else:
+        print(f"[slack] ❌ Error DM failed: {result.get('error')}")
 
 
 if __name__ == "__main__":
