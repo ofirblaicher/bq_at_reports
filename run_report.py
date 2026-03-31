@@ -43,10 +43,29 @@ except ImportError:
 
 # ───────────────────────────── Config ────────────────────────────────────────
 PROJECT_ID = "stackpulse-production"
-BQ_CONN    = "stackpulse-production.us.alert-triage"
+BQ_CONN    = "stackpulse-production.us.alert-triage"  # updated per region at runtime
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_EXTERNAL_SQL_FILE = os.path.join(OUTPUT_DIR, "bigquery_external_queries.sql")
 DEFAULT_LANGFUSE_BASE_URL = "https://langfuse.us.torqio.dev"
+
+# ───────────────────────────── Region / Account config ───────────────────────
+REGION_CONFIGS = [
+    {
+        "region":       "us",
+        "bq_conn":      "stackpulse-production.us.alert-triage",
+        "langfuse_url": "https://langfuse.us.torqio.dev",
+        "accounts":     ["6f60849e-1aab-408f-8b00-84e99768d0bd"],
+    },
+    {
+        "region":       "eu",
+        "bq_conn":      "stackpulse-production.eu.alert-triage",
+        "langfuse_url": "https://langfuse.eu.torqio.dev",
+        "accounts":     [
+            "ce0a69d6-fbba-4319-bf00-f657d00758b1",
+            "f48ed0cf-b6f6-4381-94c8-cce216012805",
+        ],
+    },
+]
 
 # ───────────────────────────── Dates (always yesterday) ──────────────────────
 TODAY     = datetime.now().date()
@@ -1704,20 +1723,14 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
 
 # ───────────────────────────── Entry point ───────────────────────────────────
 
-def main():
-    _load_env_file(os.path.join(OUTPUT_DIR, ".env"))
+def _run_for_account(account_id: str, region_cfg: dict) -> None:
+    """Run the full report pipeline for a single account in a given region."""
+    global BQ_CONN
+    BQ_CONN = region_cfg["bq_conn"]
+    os.environ["LANGFUSE_BASE_URL"] = region_cfg["langfuse_url"]
 
-    default_account = "6f60849e-1aab-408f-8b00-84e99768d0bd"
-
-    print("\n╔══════════════════════════════════════════╗")
-    print("║   Alert Triage Daily Report Generator   ║")
-    print("╚══════════════════════════════════════════╝")
-    print(f"\n  Report date : {YESTERDAY}  (yesterday)")
-    print(f"  Project     : {PROJECT_ID}")
-    print(f"\n  BigQuery Account ID  [{default_account}]: ", end="")
-
-    user_input = input().strip()
-    account_id = user_input if user_input else default_account
+    region = region_cfg["region"].upper()
+    print(f"\n  [{region}] Account: {account_id}")
 
     local_tz = datetime.now().astimezone().tzinfo
     trace_period_start = datetime.combine(YESTERDAY, time(0, 0, 0), tzinfo=local_tz)
@@ -1727,35 +1740,22 @@ def main():
     if user_err:
         print(f"  ! Langfuse user list unavailable: {user_err}")
     elif user_list:
-        # Auto-select all known (non-empty) user IDs for this account/day.
         selected_user_ids = sorted({uid for uid, _ in user_list if uid and uid != "(empty)"})
     else:
         print(f"  ! No Langfuse users found for account {account_id} on {YESTERDAY}.")
 
-    # Always run external SQL file without prompting.
     sql_file = DEFAULT_EXTERNAL_SQL_FILE if os.path.exists(DEFAULT_EXTERNAL_SQL_FILE) else ""
-
-    print(f"\n  ✓ Using account: {account_id}")
     if selected_user_ids:
         print(f"  ✓ Langfuse users (auto): {', '.join(selected_user_ids)}")
     else:
         print("  ✓ Langfuse users (auto): all")
-    if sql_file:
-        print(f"  ✓ SQL file     : {sql_file}")
-    else:
-        print("  ✓ SQL file     : built-in query templates")
-    print(f"  ✓ Date range   : {YESTERDAY} → {TODAY}\n")
-    print("Running queries...")
+    print(f"  ✓ Date range   : {YESTERDAY} → {TODAY}")
+    print("  Running queries...")
 
     bq_ok = False
     try:
-        if sql_file:
-            if not os.path.exists(sql_file):
-                print(f"  ! SQL file not found: {sql_file}")
-                print("  ! Falling back to built-in query templates.\n")
-                results = run_all_queries(account_id)
-            else:
-                results = run_external_sql_file(account_id, sql_file)
+        if sql_file and os.path.exists(sql_file):
+            results = run_external_sql_file(account_id, sql_file)
         else:
             results = run_all_queries(account_id)
         bq_ok = True
@@ -1763,10 +1763,10 @@ def main():
         print(f"  ✗ BigQuery error: {e}")
         results = {}
 
-    print("\nBuilding DOCX report...")
+    print("  Building DOCX report...")
     output_path, langfuse_ok = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids)
+    print(f"  ✅ Report saved → {output_path}")
 
-    print(f"\n✅ Done!  Report saved →  {output_path}\n")
     if bq_ok and langfuse_ok:
         _send_to_slack(output_path)
     else:
@@ -1775,8 +1775,37 @@ def main():
             failures.append("BigQuery")
         if not langfuse_ok:
             failures.append("Langfuse")
-        print(f"[slack] Skipped — failed: {', '.join(failures)}")
-        _send_error_dm(failures)
+        print(f"  [slack] Skipped — failed: {', '.join(failures)}")
+        _send_error_dm(failures, account_id=account_id, region=region)
+
+
+def main():
+    _load_env_file(os.path.join(OUTPUT_DIR, ".env"))
+
+    print("\n╔══════════════════════════════════════════╗")
+    print("║   Alert Triage Daily Report Generator   ║")
+    print("╚══════════════════════════════════════════╝")
+    print(f"\n  Report date : {YESTERDAY}  (yesterday)")
+    print(f"  Project     : {PROJECT_ID}")
+
+    default_account = REGION_CONFIGS[0]["accounts"][0]
+    print(f"\n  BigQuery Account ID (leave blank to run ALL regions/accounts) [{default_account}]: ", end="")
+    user_input = input().strip()
+
+    if user_input:
+        # Manual single-account run — find the matching region config
+        region_cfg = next(
+            (cfg for cfg in REGION_CONFIGS if user_input in cfg["accounts"]),
+            REGION_CONFIGS[0],  # default to US if not found
+        )
+        _run_for_account(user_input, region_cfg)
+    else:
+        # Auto mode — run all regions and accounts
+        for region_cfg in REGION_CONFIGS:
+            for account_id in region_cfg["accounts"]:
+                _run_for_account(account_id, region_cfg)
+
+    print("\n✅ All done!\n")
 
 
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -1834,11 +1863,13 @@ def _send_to_slack(file_path: str) -> None:
         print(f"[slack] ❌ completeUpload failed: {result.get('error')}")
 
 
-def _send_error_dm(failures: list) -> None:
+def _send_error_dm(failures: list, account_id: str = "", region: str = "") -> None:
     import urllib.request
     if not SLACK_BOT_TOKEN:
         return
-    msg = f":warning: *Alert Triage Report failed for {YESTERDAY}*\nThe following sources failed: *{', '.join(failures)}*\nReport was NOT sent to #reports."
+    context = f" | Account: `{account_id}`" if account_id else ""
+    context += f" | Region: `{region}`" if region else ""
+    msg = f":warning: *Alert Triage Report failed for {YESTERDAY}*{context}\nThe following sources failed: *{', '.join(failures)}*\nReport was NOT sent to #reports."
     body = json.dumps({"channel": "U09N5L9PHHN", "text": msg}).encode()
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
