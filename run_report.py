@@ -42,27 +42,38 @@ except ImportError:
     sys.exit(1)
 
 # ───────────────────────────── Config ────────────────────────────────────────
-PROJECT_ID = "stackpulse-production"
-BQ_CONN    = "stackpulse-production.us.alert-triage"  # updated per region at runtime
+PROJECT_ID  = "stackpulse-production"                  # updated per region at runtime
+BQ_CONN     = "stackpulse-production.us.alert-triage"  # updated per region at runtime
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_EXTERNAL_SQL_FILE = os.path.join(OUTPUT_DIR, "bigquery_external_queries.sql")
 DEFAULT_LANGFUSE_BASE_URL = "https://langfuse.us.torqio.dev"
 
+# Snapshot original Langfuse credentials at startup (before any per-region overwrite)
+_LANGFUSE_ORIG = {
+    "LANGFUSE_PUBLIC_KEY": os.environ.get("LANGFUSE_PUBLIC_KEY", ""),
+    "LANGFUSE_SECRET_KEY": os.environ.get("LANGFUSE_SECRET_KEY", ""),
+    "LANGFUSE_BASE_URL":   os.environ.get("LANGFUSE_BASE_URL", ""),
+}
+
 # ───────────────────────────── Region / Account config ───────────────────────
 REGION_CONFIGS = [
     {
-        "region":       "us",
-        "bq_conn":      "stackpulse-production.us.alert-triage",
-        "langfuse_url": "https://langfuse.us.torqio.dev",
-        "accounts":     ["6f60849e-1aab-408f-8b00-84e99768d0bd"],
+        "region":              "us",
+        "bq_project":          "stackpulse-production",
+        "bq_conn":             "stackpulse-production.us.alert-triage",
+        "langfuse_env_prefix": "",           # uses LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
+        "accounts":            [
+            {"id": "6f60849e-1aab-408f-8b00-84e99768d0bd", "name": "rocket-companies"},
+        ],
     },
     {
-        "region":       "eu",
-        "bq_conn":      "stackpulse-production.eu.alert-triage",
-        "langfuse_url": "https://langfuse.eu.torqio.dev",
-        "accounts":     [
-            "ce0a69d6-fbba-4319-bf00-f657d00758b1",
-            "f48ed0cf-b6f6-4381-94c8-cce216012805",
+        "region":              "eu",
+        "bq_project":          "torqio-eu-production",
+        "bq_conn":             "projects/torqio-eu-production/locations/eu/connections/alert-triage",
+        "langfuse_env_prefix": "LANGFUSE_EU_",  # uses LANGFUSE_EU_PUBLIC_KEY, etc.
+        "accounts":            [
+            {"id": "ce0a69d6-fbba-4319-bf00-f657d00758b1", "name": "citadel-delta"},
+            {"id": "f48ed0cf-b6f6-4381-94c8-cce216012805", "name": "citadel-haaretz"},
         ],
     },
 ]
@@ -125,8 +136,8 @@ ORDER BY step_order
 
 _SQL["alerts_by_severity"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     alert_triage.alerts.severity_level,
     CASE alert_triage.alerts.severity_level
         WHEN 500 THEN 'Critical'
@@ -146,8 +157,8 @@ WHERE {{date_range}}
   [[AND {{severity}}]]
   [[AND {{source}}]]
 GROUP BY
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text,
+    alert_triage.alerts.account_id::text,
     alert_triage.alerts.severity_level,
     DATE_TRUNC('day', alert_triage.alerts.created_at)
 ORDER BY date DESC, alert_triage.alerts.severity_level DESC
@@ -155,8 +166,8 @@ ORDER BY date DESC, alert_triage.alerts.severity_level DESC
 
 _SQL["alerts_by_source"] = """
 SELECT
-    organization_id,
-    account_id,
+    organization_id::text AS organization_id,
+    account_id::text AS account_id,
     source,
     DATE_TRUNC('hour', created_at) AS date,
     COUNT(*) AS alert_count
@@ -167,15 +178,15 @@ WHERE {{date_range}}
   [[AND {{verdict}}]]
   [[AND {{severity}}]]
   [[AND {{source}}]]
-GROUP BY organization_id, account_id, source, DATE_TRUNC('hour', created_at)
+GROUP BY organization_id::text, account_id::text, source, DATE_TRUNC('hour', created_at)
 ORDER BY date ASC, alert_count DESC
 """
 
 _SQL["alerts_by_verdict"] = """
 SELECT
     DATE_TRUNC('day', alert_triage.alerts.created_at) AS date,
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     alert_triage.alerts.verdict,
     COUNT(*) AS alert_count
 FROM alert_triage.alerts
@@ -188,16 +199,16 @@ WHERE {{date_range}}
   [[AND {{source}}]]
 GROUP BY
     DATE_TRUNC('day', alert_triage.alerts.created_at),
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text,
+    alert_triage.alerts.account_id::text,
     alert_triage.alerts.verdict
 ORDER BY date ASC, alert_count DESC
 """
 
 _SQL["cases_generated"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     COUNT(DISTINCT alert_triage.alerts.case_id) AS total_cases_generated,
     COUNT(*) FILTER (WHERE alert_triage.alerts.case_id IS NOT NULL) AS alerts_with_cases,
     COUNT(*) AS total_alerts,
@@ -212,13 +223,13 @@ WHERE {{date_range}}
   [[AND {{verdict}}]]
   [[AND {{severity}}]]
   [[AND {{source}}]]
-GROUP BY alert_triage.alerts.organization_id, alert_triage.alerts.account_id
+GROUP BY alert_triage.alerts.organization_id::text, alert_triage.alerts.account_id::text
 """
 
 _SQL["false_positive_ratio"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     COUNT(*) FILTER (WHERE alert_triage.alerts.verdict = 'FalsePositive') AS false_positive_count,
     COUNT(*) AS total_alerts,
     ROUND(
@@ -233,13 +244,13 @@ WHERE {{date_range}}
   [[AND {{verdict}}]]
   [[AND {{severity}}]]
   [[AND {{source}}]]
-GROUP BY alert_triage.alerts.organization_id, alert_triage.alerts.account_id
+GROUP BY alert_triage.alerts.organization_id::text, alert_triage.alerts.account_id::text
 ORDER BY false_positive_ratio_pct DESC
 """
 
 _SQL["human_feedback"] = """
 SELECT
-    id AS alert_id,
+    id::text AS alert_id,
     pretty_id AS alert_pretty_id,
     name,
     source,
@@ -260,8 +271,8 @@ ORDER BY created_at DESC
 
 _SQL["mean_time_to_triage"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     AVG(
         EXTRACT(EPOCH FROM (alert_triage.alerts.processed_at - alert_triage.alerts.created_at)) / 60
     ) AS mttt_minutes
@@ -274,14 +285,14 @@ WHERE {{date_range}}
   [[AND {{verdict}}]]
   [[AND {{severity}}]]
   [[AND {{source}}]]
-GROUP BY alert_triage.alerts.organization_id, alert_triage.alerts.account_id
+GROUP BY alert_triage.alerts.organization_id::text, alert_triage.alerts.account_id::text
 """
 
 _SQL["rule_effectiveness"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
-    alert_triage.rules.id          AS rule_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
+    alert_triage.rules.id::text    AS rule_id,
     alert_triage.rules.name        AS rule_name,
     alert_triage.rules.type        AS rule_type,
     alert_triage.rules.priority,
@@ -305,9 +316,9 @@ WHERE {{date_range}}
   [[AND {{severity}}]]
   [[AND {{source}}]]
 GROUP BY
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
-    alert_triage.rules.id,
+    alert_triage.alerts.organization_id::text,
+    alert_triage.alerts.account_id::text,
+    alert_triage.rules.id::text,
     alert_triage.rules.name,
     alert_triage.rules.type,
     alert_triage.rules.priority,
@@ -317,8 +328,8 @@ ORDER BY matched_alerts DESC
 
 _SQL["triggers_generated"] = """
 SELECT
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     COUNT(DISTINCT alert_triage.alerts.id) FILTER (WHERE alert_triage.rules.type = 'VERDICT_BASED_ACTION') AS total_triggers,
     COUNT(DISTINCT alert_triage.alerts.id) AS total_alerts_with_rules,
     ROUND(
@@ -334,14 +345,14 @@ WHERE {{date_range}}
   [[AND {{verdict}}]]
   [[AND {{severity}}]]
   [[AND {{source}}]]
-GROUP BY alert_triage.alerts.organization_id, alert_triage.alerts.account_id
+GROUP BY alert_triage.alerts.organization_id::text, alert_triage.alerts.account_id::text
 """
 
 _SQL["triggers_over_time"] = """
 SELECT
     DATE_TRUNC('day', alert_triage.alerts.created_at) AS date,
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id,
+    alert_triage.alerts.organization_id::text AS organization_id,
+    alert_triage.alerts.account_id::text AS account_id,
     COUNT(DISTINCT alert_triage.alerts.id) FILTER (WHERE alert_triage.rules.type = 'VERDICT_BASED_ACTION') AS triggers_generated
 FROM alert_triage.alerts
 INNER JOIN alert_triage.rules ON alert_triage.rules.id = ANY(alert_triage.alerts.matched_rule_ids)
@@ -353,8 +364,8 @@ WHERE {{date_range}}
   [[AND {{source}}]]
 GROUP BY
     DATE_TRUNC('day', alert_triage.alerts.created_at),
-    alert_triage.alerts.organization_id,
-    alert_triage.alerts.account_id
+    alert_triage.alerts.organization_id::text,
+    alert_triage.alerts.account_id::text
 ORDER BY date ASC
 """
 
@@ -1010,7 +1021,7 @@ def _normalize_external_columns(df: pd.DataFrame, key: str) -> pd.DataFrame:
 
 
 def run_external_sql_file(account_id: str, sql_file_path: str) -> dict:
-    client = bigquery.Client(project=PROJECT_ID)
+    client = bigquery.Client(project=PROJECT_ID)  # PROJECT_ID is updated per region at runtime
     results = {}
 
     with open(sql_file_path, "r", encoding="utf-8") as fh:
@@ -1041,6 +1052,11 @@ def run_external_sql_file(account_id: str, sql_file_path: str) -> dict:
 
         patched_stmt = _inject_account_id(item["statement"], account_id)
         patched_stmt = _inject_yesterday_timeframe(patched_stmt)
+        patched_stmt = re.sub(
+            r'EXTERNAL_QUERY\(\s*"[^"]*"',
+            f'EXTERNAL_QUERY(\n  "{BQ_CONN}"',
+            patched_stmt,
+        )
         patched_stmt = _alias_external_query_columns(patched_stmt, key)
         try:
             df = client.query(patched_stmt).to_dataframe()
@@ -1056,7 +1072,7 @@ def run_external_sql_file(account_id: str, sql_file_path: str) -> dict:
 # ───────────────────────────── Runner ────────────────────────────────────────
 
 def run_all_queries(account_id: str) -> dict:
-    client = bigquery.Client(project=PROJECT_ID)
+    client = bigquery.Client(project=PROJECT_ID)  # PROJECT_ID is updated per region at runtime
     results = {}
     for meta in QUERY_META:
         key, title, dr = meta["key"], meta["title"], meta["date_range"]
@@ -1634,7 +1650,7 @@ def _build_docx_metrics(results: dict, account_id: str, trace_enrichment: Option
     return metrics
 
 
-def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Optional[list[str]] = None) -> str:
+def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Optional[list[str]] = None, account_name: str = "") -> str:
     local_tz = datetime.now().astimezone().tzinfo
     trace_period_start = datetime.combine(YESTERDAY, time(0, 0, 0), tzinfo=local_tz)
     trace_period_end = datetime.combine(YESTERDAY, time(23, 59, 59), tzinfo=local_tz)
@@ -1671,6 +1687,9 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
         trace_enrichment = _derive_metrics_from_langfuse_traces(traces, account_id, report_date)
 
     metrics = _build_docx_metrics(results, account_id, trace_enrichment=trace_enrichment)
+    # Override env_name with account_name so DOCX generator uses the correct filename and title
+    if account_name:
+        metrics["env_name"] = account_name.replace("-", " ").title()
     if selected_user_ids:
         metrics.setdefault("langfuse_enrichment", {})
         metrics["langfuse_enrichment"]["user_id_filter"] = sorted(selected_user_ids)
@@ -1692,6 +1711,9 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
         json.dump(metrics, tmp, ensure_ascii=True, indent=2)
         tmp_metrics_path = tmp.name
+
+    # Snapshot existing docx files before generation so we can find the new one
+    existing_docx = set(f for f in os.listdir(OUTPUT_DIR) if f.endswith(".docx"))
 
     try:
         _ensure_node_docx_dependency()
@@ -1715,22 +1737,48 @@ def _generate_docx_report(results: dict, account_id: str, langfuse_user_ids: Opt
         except OSError:
             pass
 
-    env_name = str(metrics.get("env_name", "environment")).strip().lower()
-    env_slug = re.sub(r"[^a-z0-9]+", "_", env_name).strip("_") or "environment"
-    filename = f"{env_slug}_report_{report_date}.docx"
-    return os.path.join(OUTPUT_DIR, filename), langfuse_ok
+    # Determine desired filename from account_name or BQ env_name
+    if account_name:
+        env_slug = re.sub(r"[^a-z0-9]+", "_", account_name.lower()).strip("_")
+    else:
+        env_name = str(metrics.get("env_name", "environment")).strip().lower()
+        env_slug = re.sub(r"[^a-z0-9]+", "_", env_name).strip("_") or "environment"
+    desired_filename = f"{env_slug}_report_{report_date}.docx"
+    desired_path = os.path.join(OUTPUT_DIR, desired_filename)
+
+    # Find the newly created docx and rename it if needed
+    new_docx = [f for f in os.listdir(OUTPUT_DIR) if f.endswith(".docx") and f not in existing_docx]
+    if new_docx and new_docx[0] != desired_filename:
+        actual_path = os.path.join(OUTPUT_DIR, new_docx[0])
+        os.replace(actual_path, desired_path)
+
+    return desired_path, langfuse_ok
 
 
 # ───────────────────────────── Entry point ───────────────────────────────────
 
-def _run_for_account(account_id: str, region_cfg: dict) -> None:
+def _run_for_account(account: dict, region_cfg: dict) -> None:
     """Run the full report pipeline for a single account in a given region."""
-    global BQ_CONN
-    BQ_CONN = region_cfg["bq_conn"]
-    os.environ["LANGFUSE_BASE_URL"] = region_cfg["langfuse_url"]
+    global BQ_CONN, PROJECT_ID
+    BQ_CONN    = region_cfg["bq_conn"]
+    PROJECT_ID = region_cfg["bq_project"]
 
+    # Switch Langfuse credentials for the region
+    prefix = region_cfg.get("langfuse_env_prefix", "")
+    if prefix:
+        os.environ["LANGFUSE_PUBLIC_KEY"] = os.environ.get(f"{prefix}PUBLIC_KEY", "")
+        os.environ["LANGFUSE_SECRET_KEY"] = os.environ.get(f"{prefix}SECRET_KEY", "")
+        os.environ["LANGFUSE_BASE_URL"]   = os.environ.get(f"{prefix}BASE_URL",   "")
+    else:
+        # Restore original US credentials (may have been overwritten by a prior EU run)
+        os.environ["LANGFUSE_PUBLIC_KEY"] = _LANGFUSE_ORIG["LANGFUSE_PUBLIC_KEY"]
+        os.environ["LANGFUSE_SECRET_KEY"] = _LANGFUSE_ORIG["LANGFUSE_SECRET_KEY"]
+        os.environ["LANGFUSE_BASE_URL"]   = _LANGFUSE_ORIG["LANGFUSE_BASE_URL"]
+
+    account_id   = account["id"]
+    account_name = account["name"]
     region = region_cfg["region"].upper()
-    print(f"\n  [{region}] Account: {account_id}")
+    print(f"\n  [{region}] Account: {account_name} ({account_id})")
 
     local_tz = datetime.now().astimezone().tzinfo
     trace_period_start = datetime.combine(YESTERDAY, time(0, 0, 0), tzinfo=local_tz)
@@ -1744,27 +1792,24 @@ def _run_for_account(account_id: str, region_cfg: dict) -> None:
     else:
         print(f"  ! No Langfuse users found for account {account_id} on {YESTERDAY}.")
 
-    sql_file = DEFAULT_EXTERNAL_SQL_FILE if os.path.exists(DEFAULT_EXTERNAL_SQL_FILE) else ""
     if selected_user_ids:
         print(f"  ✓ Langfuse users (auto): {', '.join(selected_user_ids)}")
     else:
         print("  ✓ Langfuse users (auto): all")
     print(f"  ✓ Date range   : {YESTERDAY} → {TODAY}")
+    print(f"  ✓ Queries      : {len(QUERY_META)} (shared set, US + EU)")
     print("  Running queries...")
 
     bq_ok = False
     try:
-        if sql_file and os.path.exists(sql_file):
-            results = run_external_sql_file(account_id, sql_file)
-        else:
-            results = run_all_queries(account_id)
+        results = run_all_queries(account_id)
         bq_ok = True
     except Exception as e:
         print(f"  ✗ BigQuery error: {e}")
         results = {}
 
     print("  Building DOCX report...")
-    output_path, langfuse_ok = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids)
+    output_path, langfuse_ok = _generate_docx_report(results, account_id, langfuse_user_ids=selected_user_ids, account_name=account_name)
     print(f"  ✅ Report saved → {output_path}")
 
     if bq_ok and langfuse_ok:
@@ -1779,31 +1824,72 @@ def _run_for_account(account_id: str, region_cfg: dict) -> None:
         _send_error_dm(failures, account_id=account_id, region=region)
 
 
+def _set_report_date(target_date) -> None:
+    """Patch module-level date globals for historical runs."""
+    import datetime as _dt
+    global YESTERDAY, TODAY, DATE_RANGE_QUALIFIED, DATE_RANGE_BARE
+    if isinstance(target_date, str):
+        target_date = _dt.date.fromisoformat(target_date)
+    YESTERDAY = target_date
+    TODAY = target_date + _dt.timedelta(days=1)
+    DATE_RANGE_QUALIFIED = (
+        f"alert_triage.alerts.created_at >= '{YESTERDAY}'::timestamp "
+        f"AND alert_triage.alerts.created_at < '{TODAY}'::timestamp"
+    )
+    DATE_RANGE_BARE = (
+        f"created_at >= '{YESTERDAY}'::timestamp "
+        f"AND created_at < '{TODAY}'::timestamp"
+    )
+
+
 def main():
+    import argparse as _ap
+    import datetime as _dt
+
     _load_env_file(os.path.join(OUTPUT_DIR, ".env"))
 
-    print("\n╔══════════════════════════════════════════╗")
-    print("║   Alert Triage Daily Report Generator   ║")
-    print("╚══════════════════════════════════════════╝")
-    print(f"\n  Report date : {YESTERDAY}  (yesterday)")
-    print(f"  Project     : {PROJECT_ID}")
+    parser = _ap.ArgumentParser(add_help=False)
+    parser.add_argument("--date", nargs="+", default=None,
+                        help="One or more report dates YYYY-MM-DD (default: yesterday)")
+    args, _ = parser.parse_known_args()
 
-    default_account = REGION_CONFIGS[0]["accounts"][0]
-    print(f"\n  BigQuery Account ID (leave blank to run ALL regions/accounts) [{default_account}]: ", end="")
-    user_input = input().strip()
-
-    if user_input:
-        # Manual single-account run — find the matching region config
-        region_cfg = next(
-            (cfg for cfg in REGION_CONFIGS if user_input in cfg["accounts"]),
-            REGION_CONFIGS[0],  # default to US if not found
-        )
-        _run_for_account(user_input, region_cfg)
+    dates_to_run = []
+    if args.date:
+        for d in args.date:
+            try:
+                dates_to_run.append(_dt.date.fromisoformat(d))
+            except ValueError:
+                print(f"[error] Invalid date: {d} (expected YYYY-MM-DD)")
+                sys.exit(1)
     else:
-        # Auto mode — run all regions and accounts
-        for region_cfg in REGION_CONFIGS:
-            for account_id in region_cfg["accounts"]:
-                _run_for_account(account_id, region_cfg)
+        dates_to_run = [YESTERDAY]
+
+    for target_date in dates_to_run:
+        _set_report_date(target_date)
+
+        print("\n╔══════════════════════════════════════════╗")
+        print("║   Alert Triage Daily Report Generator   ║")
+        print("╚══════════════════════════════════════════╝")
+        print(f"\n  Report date : {YESTERDAY}")
+        print(f"  Project     : {PROJECT_ID}")
+
+        default_account = REGION_CONFIGS[0]["accounts"][0]
+        if len(dates_to_run) == 1:
+            print(f"\n  BigQuery Account ID (leave blank to run ALL regions/accounts) [{default_account['id']}]: ", end="")
+            user_input = input().strip()
+        else:
+            user_input = ""  # always run all accounts in multi-date mode
+
+        if user_input:
+            region_cfg, account = next(
+                ((cfg, acc) for cfg in REGION_CONFIGS for acc in cfg["accounts"] if acc["id"] == user_input),
+                (REGION_CONFIGS[0], {"id": user_input, "name": user_input}),
+            )
+            _run_for_account(account, region_cfg)
+        else:
+            for region_cfg in REGION_CONFIGS:
+                for account in region_cfg["accounts"]:
+                    _run_for_account(account, region_cfg)
 
     print("\n✅ All done!\n")
 

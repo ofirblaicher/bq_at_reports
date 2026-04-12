@@ -315,9 +315,9 @@ def patch_template(content: str, metrics: dict, summary: str, output_docx: Path)
             )
             content = content[:card_start] + replacement + content[verdict_start:]
 
-    # Replace repeated trends rows if explicit trend data is provided.
+    # Replace repeated trends rows — always overwrite template defaults, even when empty.
     trends = metrics.get("trends")
-    if isinstance(trends, list) and trends:
+    if isinstance(trends, list):
         section_anchor = "sectionLabel('Repeated Trends')"
         section_idx = content.find(section_anchor)
         if section_idx >= 0:
@@ -326,24 +326,26 @@ def patch_template(content: str, metrics: dict, summary: str, output_docx: Path)
             header_end = content.find("          ]}),", header_start)
             rows_end = content.find("        ]\n      }),", header_end)
             if header_start >= 0 and header_end > header_start and rows_end > header_end:
-                row_lines = []
-                for i, t in enumerate(trends[:7], start=1):
-                    host = js_escape(str(t.get("host", "Various")))
-                    alerts = int(t.get("alerts", t.get("count", 0)))
-                    count = int(t.get("count", alerts))
-                    alert_type = js_escape(str(t.get("alert_type", "Alert trend")))
-                    level = str(t.get("level", "")).lower()
-                    color = "C.muted"
-                    bg = "C.white"
-                    if level in {"critical", "malicious", "escalated"}:
-                        color, bg = "C.critical", "C.critBg"
-                    elif level in {"high", "policy", "warning"}:
-                        color, bg = "C.high", "C.highBg"
-                    elif level in {"benign", "slate", "muted"}:
-                        color, bg = "C.muted", "C.slBg"
-                    row_lines.append(
-                        f"          hostRow({i}, '{host}', {alerts}, '{alert_type}', {color}, {bg}),"
-                    )
+                if not trends:
+                    row_lines = ["          hostRow(1, 'No repeated trends for this period', 0, '\\u2014', C.muted, C.white),"]
+                else:
+                    row_lines = []
+                    for i, t in enumerate(trends[:7], start=1):
+                        host = js_escape(str(t.get("host", "Various")))
+                        alerts = int(t.get("alerts", t.get("count", 0)))
+                        alert_type = js_escape(str(t.get("alert_type", "Alert trend")))
+                        level = str(t.get("level", "")).lower()
+                        color = "C.muted"
+                        bg = "C.white"
+                        if level in {"critical", "malicious", "escalated"}:
+                            color, bg = "C.critical", "C.critBg"
+                        elif level in {"high", "policy", "warning"}:
+                            color, bg = "C.high", "C.highBg"
+                        elif level in {"benign", "slate", "muted"}:
+                            color, bg = "C.muted", "C.slBg"
+                        row_lines.append(
+                            f"          hostRow({i}, '{host}', {alerts}, '{alert_type}', {color}, {bg}),"
+                        )
                 rows_block = "\n".join(row_lines) + "\n"
                 content = content[: header_end + len("          ]}),\n")] + rows_block + content[rows_end:]
 
